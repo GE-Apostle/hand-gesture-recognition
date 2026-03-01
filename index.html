@@ -2,27 +2,16 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, 
-initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>hand_view_whiteboard</title>
   <style>
-    body { margin: 18px; background: #000; color: #eee; 
-font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", 
-Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft 
-YaHei", sans-serif; }
+    body { margin: 18px; background: #000; color: #eee; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif; }
     .wrap { max-width: 1100px; margin: 0 auto; }
-    .panel { position: relative; width: 100%; background: 
-#000; border-radius: 12px; overflow: hidden; box-shadow: 0 0 
-0 1px rgba(255,255,255,0.08) inset; }
-    canvas { position: absolute; inset: 0; width: 100%; 
-height: 100%; display: block; }
-    .hud { margin-top: 12px; display: flex; gap: 12px; flex
-wrap: wrap; align-items: center; }
-    .badge { padding: 6px 10px; border-radius: 999px; 
-background: rgba(255,255,255,0.08); border: 1px solid 
-rgba(255,255,255,0.12); color: #eee; font-size: 14px; }
-    .hint { margin-top: 8px; color: rgba(255,255,255,0.72); 
-font-size: 13px; line-height: 1.5; }
+    .panel { position: relative; width: 100%; background: #000; border-radius: 12px; overflow: hidden; box-shadow: 0 0 0 1px rgba(255,255,255,0.08) inset; }
+    canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+    .hud { margin-top: 12px; display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+    .badge { padding: 6px 10px; border-radius: 999px; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.12); color: #eee; font-size: 14px; }
+    .hint { margin-top: 8px; color: rgba(255,255,255,0.72); font-size: 13px; line-height: 1.5; }
   </style>
 </head>
 <body>
@@ -31,59 +20,60 @@ font-size: 13px; line-height: 1.5; }
       <canvas id="viewCanvas"></canvas>
       <canvas id="drawCanvas"></canvas>
     </div>
+
     <div class="hud">
-      <span class="badge" id="status">状态初始化中...</span>
-      <span class="badge" id="mode">模式--</span>
-      <span class="badge" id="res">分辨率--</span>
+      <span class="badge" id="status">状态：初始化中...</span>
+      <span class="badge" id="mode">模式：--</span>
+      <span class="badge" id="res">分辨率：--</span>
     </div>
+
     <div class="hint">
-⼿势说明仅⻝指伸直=画笔红⾊⻝指+中指伸直=区域橡⽪擦｡ <br>
-说明全程本地运⾏不上传视频⻚⾯做了镜像显示如果画⾯⽐例不对
-刷新⼀次即可重新⾃适应｡
+      手势说明：仅食指伸直=画笔（红色）；食指+中指伸直=区域橡皮擦。<br>
+      说明：全程本地运行，不上传视频；页面做了镜像显示；如果画面比例不对，刷新一次即可重新自适应。
     </div>
   </div>
-  <video id="video" playsinline style="display:none;"></
-video>
+
+  <video id="video" playsinline style="display:none;"></video>
+
   <script type="module">
     const panel = document.getElementById("panel");
-    const viewCanvas = 
-document.getElementById("viewCanvas");
-    const drawCanvas = 
-document.getElementById("drawCanvas");
+    const viewCanvas = document.getElementById("viewCanvas");
+    const drawCanvas = document.getElementById("drawCanvas");
     const vctx = viewCanvas.getContext("2d");
     const dctx = drawCanvas.getContext("2d");
     const video = document.getElementById("video");
+
     const statusEl = document.getElementById("status");
     const modeEl = document.getElementById("mode");
     const resEl = document.getElementById("res");
-    function setStatus(t) { statusEl.textContent = "状态" + 
-t; }
-    function setMode(t) { modeEl.textContent = "模式" + 
-t; }
-    function setRes(t) { resEl.textContent = "分辨率" + t; }
+
+    function setStatus(t) { statusEl.textContent = "状态：" + t; }
+    function setMode(t) { modeEl.textContent = "模式：" + t; }
+    function setRes(t) { resEl.textContent = "分辨率：" + t; }
+
     let stream = null;
     let rafId = null;
-    // MediaPipe Tasks Web 动态加载
+
+    // MediaPipe Tasks Web（动态加载）
     let vision = null;
     let FilesetResolver = null;
     let HandLandmarker = null;
     let DrawingUtils = null;
     let handLandmarker = null;
     let drawingUtils = null;
-    // 
-画板状态
-    const PEN_COLOR = "#ff3b30"; // 固定红⾊
+
+    // 画板状态
+    const PEN_COLOR = "#ff3b30"; // 固定红色
     const PEN_WIDTH = 7;
-    const ERASER_RADIUS = 26;    // 区域橡⽪擦半径
-    const SMOOTH_ALPHA = 0.45;   // 越⼤越跟⼿越⼩越稳
+    const ERASER_RADIUS = 26;    // 区域橡皮擦半径
+    const SMOOTH_ALPHA = 0.45;   // 越大越跟手，越小越稳
+
     let smoothPt = null;         // 平滑后的像素坐标
-    let prevPt = null;           // 上⼀笔尖像素坐标
-    let lastSeenTs = 0;          // 最近⼀次检测到⼿的时间戳⽤于
-抗掉帧
-    const HOLD_MS = 180;         // 短暂丢⼿时继续“黏住”笔尖减
-少断笔
-    // 
-计算视频绘制矩形保持⽐例不拉伸contain
+    let prevPt = null;           // 上一笔尖像素坐标
+    let lastSeenTs = 0;          // 最近一次检测到手的时间戳（用于抗掉帧）
+    const HOLD_MS = 180;         // 短暂丢手时继续“黏住”笔尖，减少断笔
+
+    // 计算视频绘制矩形：保持比例不拉伸（contain）
     function calcContainRect(srcW, srcH, dstW, dstH) {
       const srcAR = srcW / srcH;
       const dstAR = dstW / dstH;
@@ -101,71 +91,78 @@ t; }
       }
       return { x, y, w, h };
     }
-    // canvas 尺⼨与⾯板⽐例⾃适应视频避免“压缩整个⼈”
+
+    // canvas 尺寸与面板比例自适应视频，避免“压缩整个人”
     function resizeToVideo() {
       const vw = video.videoWidth || 1280;
       const vh = video.videoHeight || 720;
-      // 
-⾯板按视频⽐例⾃适应关键不再固定 16/9
+
+      // 面板按视频比例自适应（关键：不再固定 16/9）
       panel.style.aspectRatio = `${vw} / ${vh}`;
+
       if (viewCanvas.width !== vw) viewCanvas.width = vw;
       if (viewCanvas.height !== vh) viewCanvas.height = vh;
       if (drawCanvas.width !== vw) drawCanvas.width = vw;
       if (drawCanvas.height !== vh) drawCanvas.height = vh;
+
       setRes(`${vw}×${vh}`);
     }
-    // 
-归⼀化点 -> 像素点注意我们做镜像显示所以 x 需要镜像
+
+    // 归一化点 -> 像素点（注意我们做镜像显示，所以 x 需要镜像）
     function normToPixel(pt, w, h) {
       return { x: (1 - pt.x) * w, y: pt.y * h };
     }
+
     function smoothPoint(pt) {
       if (!smoothPt) {
         smoothPt = { x: pt.x, y: pt.y };
         return smoothPt;
       }
-      smoothPt.x = smoothPt.x + (pt.x - smoothPt.x) * 
-SMOOTH_ALPHA;
-      smoothPt.y = smoothPt.y + (pt.y - smoothPt.y) * 
-SMOOTH_ALPHA;
+      smoothPt.x = smoothPt.x + (pt.x - smoothPt.x) * SMOOTH_ALPHA;
+      smoothPt.y = smoothPt.y + (pt.y - smoothPt.y) * SMOOTH_ALPHA;
       return smoothPt;
     }
-    // 
-画笔做“插值补点” 解决短短续续
+
+    // 画笔：做“插值补点”，解决短短续续
     function drawLineInterpolated(from, to) {
       const dx = to.x - from.x;
       const dy = to.y - from.y;
       const dist = Math.sqrt(dx*dx + dy*dy);
-      // 
-每 3 像素补⼀个点越⼩越密越连续
+
+      // 每 3 像素补一个点（越小越密越连续）
       const step = 3;
       const n = Math.max(1, Math.floor(dist / step));
+
       dctx.save();
       dctx.globalCompositeOperation = "source-over";
       dctx.strokeStyle = PEN_COLOR;
       dctx.lineWidth = PEN_WIDTH;
       dctx.lineCap = "round";
       dctx.lineJoin = "round";
+
       dctx.beginPath();
       dctx.moveTo(from.x, from.y);
       for (let i = 1; i <= n; i++) {
         const t = i / n;
-      }
         dctx.lineTo(from.x + dx * t, from.y + dy * t);
+      }
       dctx.stroke();
       dctx.restore();
     }
-    // 
-区域橡⽪擦沿着移动路径“擦⼀条带”
+
+    // 区域橡皮擦：沿着移动路径“擦一条带”
     function eraseAlong(from, to) {
       const dx = to.x - from.x;
       const dy = to.y - from.y;
       const dist = Math.sqrt(dx*dx + dy*dy);
+
       const step = 4;
       const n = Math.max(1, Math.floor(dist / step));
+
       dctx.save();
       dctx.globalCompositeOperation = "destination-out";
       dctx.fillStyle = "rgba(0,0,0,1)";
+
       for (let i = 0; i <= n; i++) {
         const t = i / n;
         const x = from.x + dx * t;
@@ -176,15 +173,13 @@ SMOOTH_ALPHA;
       }
       dctx.restore();
     }
-    // 
-⼿指伸直判定适合“⼿指⼤致朝上”的交互姿态
+
+    // 手指伸直判定（适合“手指大致朝上”的交互姿态）
     function fingerExtended(lm, mcp, pip, tip) {
-      return (lm[tip].y < lm[pip].y) && (lm[tip].y < 
-lm[mcp].y);
+      return (lm[tip].y < lm[pip].y) && (lm[tip].y < lm[mcp].y);
     }
-    // 
-判定“仅⻝指伸直” index=true middle/ring/pinky=false 拇
-指不强约束
+
+    // 判定“仅食指伸直”：index=true，middle/ring/pinky=false（拇指不强约束）
     function isOnlyIndex(lm) {
       const index = fingerExtended(lm, 5, 6, 8);
       const middle = fingerExtended(lm, 9, 10, 12);
@@ -192,9 +187,8 @@ lm[mcp].y);
       const pinky = fingerExtended(lm, 17, 18, 20);
       return index && !middle && !ring && !pinky;
     }
-    // 
-判定“⻝指+中指伸直” index=true middle=true ring/
-pinky=false
+
+    // 判定“食指+中指伸直”：index=true middle=true ring/pinky=false
     function isIndexMiddle(lm) {
       const index = fingerExtended(lm, 5, 6, 8);
       const middle = fingerExtended(lm, 9, 10, 12);
@@ -202,29 +196,29 @@ pinky=false
       const pinky = fingerExtended(lm, 17, 18, 20);
       return index && middle && !ring && !pinky;
     }
+
     async function initMediaPipe() {
-      setStatus("加载 MediaPipe JS/WASM/模型...");
-      vision = await import("https://unpkg.com/@mediapipe/
-tasks-vision@0.10.14");
-      ({ FilesetResolver, HandLandmarker, DrawingUtils } = 
-vision);
+      setStatus("加载 MediaPipe（JS/WASM/模型）...");
+      vision = await import("https://unpkg.com/@mediapipe/tasks-vision@0.10.14");
+      ({ FilesetResolver, HandLandmarker, DrawingUtils } = vision);
+
       const fileset = await FilesetResolver.forVisionTasks(
-        "https://unpkg.com/@mediapipe/tasks-vision@0.10.14/
-wasm"
+        "https://unpkg.com/@mediapipe/tasks-vision@0.10.14/wasm"
       );
-      handLandmarker = await 
-HandLandmarker.createFromOptions(fileset, {
-        baseOptions: { modelAssetPath: "./
-hand_landmarker.task" },
+
+      handLandmarker = await HandLandmarker.createFromOptions(fileset, {
+        baseOptions: { modelAssetPath: "./hand_landmarker.task" },
         runningMode: "VIDEO",
-        numHands: 1, // 画板先⽤单⼿更稳
+        numHands: 1, // 画板先用单手更稳
         minHandDetectionConfidence: 0.5,
         minHandPresenceConfidence: 0.5,
         minTrackingConfidence: 0.5
       });
+
       drawingUtils = new DrawingUtils(vctx);
       setStatus("MediaPipe 就绪");
     }
+
     async function openCamera() {
       setStatus("请求摄像头权限中...");
       stream = await navigator.mediaDevices.getUserMedia({
@@ -236,84 +230,91 @@ hand_landmarker.task" },
         },
         audio: false
       });
+
       video.srcObject = stream;
       await video.play();
+
       resizeToVideo();
-      setStatus("摄像头已开启运⾏中");
-      setMode("等待⼿势");
+      setStatus("摄像头已开启，运行中");
+      setMode("等待手势");
     }
+
     function loop() {
-      // 
-保险有些浏览器 videoWidth/Height 会晚⼀拍
-      if (video.videoWidth && video.videoHeight) 
-resizeToVideo();
+      // 保险：有些浏览器 videoWidth/Height 会晚一拍
+      if (video.videoWidth && video.videoHeight) resizeToVideo();
+
       const W = viewCanvas.width;
       const H = viewCanvas.height;
-      // 1) 背景⿊⾊ 你要求的背景换⿊
+
+      // 1) 背景黑色（你要求的背景换黑）
       vctx.save();
       vctx.clearRect(0, 0, W, H);
       vctx.fillStyle = "#000";
       vctx.fillRect(0, 0, W, H);
-      // 2) 画摄像头保持⽐例不拉伸contain并镜像
-      const rect = calcContainRect(video.videoWidth || W, 
-video.videoHeight || H, W, H);
+
+      // 2) 画摄像头：保持比例不拉伸（contain），并镜像
+      const rect = calcContainRect(video.videoWidth || W, video.videoHeight || H, W, H);
       vctx.translate(W, 0);
       vctx.scale(-1, 1);
       vctx.drawImage(video, rect.x, rect.y, rect.w, rect.h);
       vctx.restore();
+
       // 3) 推理
       const now = performance.now();
-      const result = handLandmarker.detectForVideo(video, 
-now);
+      const result = handLandmarker.detectForVideo(video, now);
+
       let hasHand = false;
-      let mode = "等待⼿势";
+      let mode = "等待手势";
+
       if (result.landmarks && result.landmarks.length > 0) {
         hasHand = true;
         lastSeenTs = now;
+
         const lm = result.landmarks[0];
-        // 
-画⻣架叠加在 viewCanvas 上
+
+        // 画骨架（叠加在 viewCanvas 上）
         vctx.save();
         vctx.translate(W, 0);
         vctx.scale(-1, 1);
-        drawingUtils.drawConnectors(lm, 
-HandLandmarker.HAND_CONNECTIONS);
+        drawingUtils.drawConnectors(lm, HandLandmarker.HAND_CONNECTIONS);
         drawingUtils.drawLandmarks(lm, { radius: 3 });
         vctx.restore();
+
         const drawOn = isOnlyIndex(lm);
         const eraseOn = isIndexMiddle(lm);
-        // 
-⽤⻝指尖当笔尖
+
+        // 用食指尖当笔尖
         const tipPx = normToPixel(lm[8], W, H);
         const sp = smoothPoint(tipPx);
+
         if (drawOn) {
-          mode = "画笔 仅⻝指伸直";
+          mode = "画笔（仅食指伸直）";
           if (!prevPt) prevPt = { x: sp.x, y: sp.y };
           drawLineInterpolated(prevPt, sp);
           prevPt = { x: sp.x, y: sp.y };
         } else if (eraseOn) {
-          mode = "区域橡⽪擦 ⻝指+中指";
+          mode = "区域橡皮擦（食指+中指）";
           if (!prevPt) prevPt = { x: sp.x, y: sp.y };
           eraseAlong(prevPt, sp);
           prevPt = { x: sp.x, y: sp.y };
         } else {
-          // 
-⾮绘制/⾮擦除姿态抬笔
+          // 非绘制/非擦除姿态：抬笔
           prevPt = null;
           smoothPt = null;
         }
       } else {
-        // 
-没检测到⼿短时间 HOLD 以减少断笔超过就抬笔
+        // 没检测到手：短时间 HOLD 以减少断笔；超过就抬笔
         if (now - lastSeenTs > HOLD_MS) {
           prevPt = null;
           smoothPt = null;
         }
-        mode = "未检测到⼿";
+        mode = "未检测到手";
       }
+
       setMode(mode);
       rafId = requestAnimationFrame(loop);
     }
+
     async function main() {
       try {
         await initMediaPipe();
@@ -322,20 +323,17 @@ HandLandmarker.HAND_CONNECTIONS);
       } catch (e) {
         console.error(e);
         const msg = String(e).toLowerCase();
-        if (msg.includes("permission") || 
-msg.includes("denied")) setStatus("摄像头权限被拒绝请在地址栏相机
-权限⾥允许");
-        else if (msg.includes("hand_landmarker.task")) 
-setStatus("模型加载失败确认 hand_landmarker.task 与 index.html 
-同⽬录且⽂件名⼀致");
-        else setStatus("初始化失败 可能是⽹络/CDN/WASM打开控制台
-看第⼀条报错");
+        if (msg.includes("permission") || msg.includes("denied")) setStatus("摄像头权限被拒绝（请在地址栏相机权限里允许）");
+        else if (msg.includes("hand_landmarker.task")) setStatus("模型加载失败（确认 hand_landmarker.task 与 index.html 同目录且文件名一致）");
+        else setStatus("初始化失败（可能是网络/CDN/WASM，打开控制台看第一条报错）");
       }
     }
+
     window.addEventListener("beforeunload", () => {
       if (rafId) cancelAnimationFrame(rafId);
       if (stream) stream.getTracks().forEach(t => t.stop());
     });
+
     main();
   </script>
 </body>
